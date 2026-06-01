@@ -6,7 +6,7 @@ from pyrogram import Client, filters
 from pyrogram.raw.functions.channels import GetFullChannel
 from pyrogram.raw.functions.phone import ToggleGroupCallSettings
 from pytgcalls import PyTgCalls
-from pytgcalls.types import MediaStream
+from pytgcalls.types.input_stream import AudioPiped
 
 load_dotenv()
 
@@ -21,7 +21,7 @@ except Exception as e:
 
 # Pyrogram Client
 app = Client("AdvancedAntiDdos", session_string=SESSION_STRING, api_id=API_ID, api_hash=API_HASH)
-# PyTgCalls Client (VC में बैठने के लिए)
+# PyTgCalls Client
 call_py = PyTgCalls(app)
 
 # Anti-Raid डेटाबेस
@@ -32,17 +32,16 @@ TIME_WINDOW = 5
 ACTIVE_CHATS = set() 
 
 # ==========================================
-# 🎤 1. VC JOIN & LEAVE COMMANDS (New)
+# 🎤 1. VC JOIN & LEAVE COMMANDS
 # ==========================================
 @app.on_message(filters.command("joinvc", prefixes=".") & filters.user(SUDO_USERS))
 async def join_vc(client, message):
     chat_id = message.chat.id
-    msg = await message.reply_text("⏳ **VC में जुड़ रहा हूँ...**")
+    msg = await message.reply_text("⏳ **VC में जुड़ रहा हूँ...**")
     try:
-        # बॉट को VC में 24/7 एक्टिव रखने के लिए एक लो-फाई/साइलेंट रेडियो लिंक प्ले कर रहे हैं
-        # इससे टेलीग्राम बॉट को कभी बाहर नहीं निकालेगा।
         radio_url = "http://stream.zeno.fm/f3wvbbqmdg8uv" 
-        await call_py.play(chat_id, MediaStream(radio_url))
+        await call_py.join_group_call(chat_id, AudioPiped(radio_url))
+        ACTIVE_CHATS.add(chat_id)
         await msg.edit_text("✅ **मैं VC में बैठ गया हूँ!** (24/7 Active)")
     except Exception as e:
         await msg.edit_text(f"❌ Error: {e}")
@@ -50,7 +49,8 @@ async def join_vc(client, message):
 @app.on_message(filters.command("leavevc", prefixes=".") & filters.user(SUDO_USERS))
 async def leave_vc(client, message):
     try:
-        await call_py.leave_call(message.chat.id)
+        await call_py.leave_group_call(message.chat.id)
+        ACTIVE_CHATS.discard(message.chat.id)
         await message.reply_text("✅ **VC से बाहर आ गया हूँ।**")
     except Exception as e:
         await message.reply_text(f"❌ Error: {e}")
@@ -93,7 +93,7 @@ async def vc_shield_and_udp_mitigation(client, message):
                     
             await message.reply_text(
                 "🚨 **DDoS / Glitch Attempt Detected!**\n"
-                "🛡 **VC शील्ड ON:** नए यूज़र्स ऑटो-म्यूट कर दिए गए हैं।\n"
+                "🛡 **VC शील्ड ON:** नए यूज़र्स ऑटो-म्यूट कर दिए गए हैं।\n"
                 f"⚔️ **Auto-Kick:** {banned_count} सस्पीशियस बॉट्स को निकाल दिया गया है।"
             )
             
@@ -125,15 +125,15 @@ async def manual_kick_glitcher(client, message):
             user = await client.get_users(message.command[1])
             user_id = user.id
         except Exception:
-            return await message.reply_text("❌ यूज़र नहीं मिला। कृपया सही यूज़रनेम (जैसे @username) या ID टाइप करें।")
+            return await message.reply_text("❌ यूज़र नहीं मिला।")
     else:
-        return await message.reply_text("❌ इस्तेमाल का तरीका: किसी मैसेज पर रिप्लाई करें या `.kickglitch @username` लिखें।")
+        return await message.reply_text("❌ इस्तेमाल: रिप्लाई करें या `.kickglitch @username` लिखें।")
     
     try:
         await client.ban_chat_member(message.chat.id, user_id)
-        await message.reply_text(f"✅ **Glitcher Kicked!** [{user_id}] का कनेक्शन सर्वर से काट दिया गया है।")
+        await message.reply_text(f"✅ **Glitcher Kicked!** [{user_id}]")
     except Exception as e:
-        await message.reply_text(f"❌ एरर (शायद वह एडमिन है या ग्रुप में नहीं है): `{e}`")
+        await message.reply_text(f"❌ Error: `{e}`")
 
 @app.on_message(filters.command("vclock", prefixes=".") & filters.user(SUDO_USERS))
 async def lock_vc(client, message):
@@ -143,7 +143,7 @@ async def lock_vc(client, message):
         call_info = full_chat.full_chat.call
         if call_info:
             await client.invoke(ToggleGroupCallSettings(call=call_info, join_muted=True))
-            await message.reply_text("🔒 **VC Lock:** अब VC में कोई भी नया बंदा माइक ऑन नहीं कर पाएगा।")
+            await message.reply_text("🔒 **VC Lock:** नए लोग माइक ऑन नहीं कर पाएंगे।")
         else:
             await message.reply_text("❌ अभी कोई VC चालू नहीं है।")
     except Exception as e:
@@ -157,9 +157,9 @@ async def unlock_vc(client, message):
         call_info = full_chat.full_chat.call
         if call_info:
             await client.invoke(ToggleGroupCallSettings(call=call_info, join_muted=False))
-            await message.reply_text("🔓 **VC Unlock:** स्थिति सामान्य है। अब लोग माइक ऑन कर सकते हैं।")
+            await message.reply_text("🔓 **VC Unlock:** अब लोग माइक ऑन कर सकते हैं।")
     except Exception as e:
-        pass
+        await message.reply_text(f"❌ Error: {e}")
 
 # ==========================================
 # 🔄 4. AUTO BACKGROUND CHECK
@@ -173,7 +173,7 @@ async def auto_vc_check():
                 full_chat = await app.invoke(GetFullChannel(channel=peer))
                 call_info = full_chat.full_chat.call
                 if call_info:
-                    print(f"[VC TICK] Chat {chat_id} - VC Active. Monitoring...")
+                    print(f"[VC TICK] Chat {chat_id} - VC Active.")
                 else:
                     print(f"[VC TICK] Chat {chat_id} - VC Offline.")
             except Exception:
@@ -182,7 +182,7 @@ async def auto_vc_check():
 async def main():
     await app.start()
     await call_py.start()
-    print("✅ Advanced Anti-DDoS Bot (with VC Join) Started!")
+    print("✅ Advanced Anti-DDoS Bot Started!")
     asyncio.create_task(auto_vc_check())
     from pyrogram import idle
     await idle()
